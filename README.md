@@ -4,6 +4,8 @@
 
 **把夸克网盘接到 Mac，用 IINA 播放原文件。**
 
+[下载 Mac 安装包](https://github.com/xing0325/fuckquark/releases/latest) · macOS 13+ · Apple Silicon / Intel 双架构
+
 不想每次看剧都翻一长串文件名，也不想围着网页播放器的会员档位转。所以有了这个私人影院：打开片库、点海报、选一季，再点一集就播。署名：`xing0325/fuckquark`。
 
 ![片库首页](docs/library.png)
@@ -14,7 +16,8 @@
 - 把原文件交给 IINA 流式播放，不必先下载完整一集。
 - 按剧、季、集浏览，搜索当前季，记录最近打开的剧集。
 - 匹配同目录的外挂字幕；视频加载后自动加载并选中字幕。
-- 原生 SwiftUI 界面，目前内置《金装律师》《火线》《东京女子图鉴》三部剧的展示配置。
+- 原生 SwiftUI 界面，自动显示所选目录里的影视文件夹；三部预设剧集有专属海报，其他文件夹使用通用封面。
+- 内置夸克登录窗口、可视化目录选择和 IINA 官网安装入口。
 
 ![剧集与外挂字幕](docs/wire.png)
 
@@ -35,32 +38,42 @@
 
 原片下载约五分钟后进行了本地解码验证，临时视频已删除。网页转码样本和原片都约 24 帧。此测试没有测量浏览器播放过程中的丢帧，也没有验证 SVIP 的 60 帧功能；不能据此认定平台故意降帧。实际画质、帧率与流畅度仍取决于原文件、网络及设备。
 
-## 在自己的 Mac 上运行
+## 安装与开始播放
 
-**目前是开发者预览，没有开箱即用的安装包。** 已在作者的 Apple Silicon Mac 上验证；其他 macOS 版本与 Intel Mac 尚未验证。首次配置仍需自己取得夸克登录 Cookie。
+1. 从 [Releases](https://github.com/xing0325/fuckquark/releases/latest) 下载 `fuckquark-0.2.0-universal.dmg`，把应用拖进 Applications。
+2. 打开应用，点击“登录夸克”，在官网窗口扫码登录，再点“登录完成”。
+3. 浏览到自己的影视根目录，点击“使用这个目录，进入片库”。没有 IINA 时，点击“安装 IINA”即可从官网下载并安装。
+4. 点海报选剧，再点一集播放。外挂字幕和视频放在同一目录，用相同文件名主体或对应的 SxxExx 集号。
 
-1. 安装 [IINA](https://iina.io/) 到 `/Applications/IINA.app`，安装 Xcode Command Line Tools 和 Python 3。
-2. 从 [quarkdrive-webdav](https://github.com/chenqimiao/quarkdrive-webdav) 官方 Releases 下载适合本机架构的二进制，按上游说明赋予执行权限。项目测试使用 v1.3.9。
-3. 在夸克里准备一个影视根目录，其中的剧名文件夹包含“金装”“火线”或“东京女子”。分季文件夹可采用 `Season 1`、`S01` 等名称；外挂字幕和视频保持同目录、同文件名主体。
-4. 克隆源码并执行：
+安装不需要终端、Python 或开发环境。已有 IINA 不会覆盖；新安装的 IINA 位于 `~/Applications/IINA.app`，下载后会检查官方开发者签名。应用只读取自己的网盘。
+
+**首次打开：此版本未做 Apple Developer ID 签名和公证。** 如果 macOS 拦截，确认下载来源后，由用户在「系统设置 → 隐私与安全性」选择「仍要打开」。不需要关闭系统安全保护。完整步骤随 DMG 附带。
+
+支持 macOS 13+，包含 arm64 与 x86_64 主程序和对应网盘组件。Apple Silicon 已实测；Intel 尚未在实机验证。退出片库会停止本应用启动的网盘服务，播放时请保持片库开启。
+
+登录过期或更换目录，打开左下角「网盘与播放器」重新设置。Cookie 只保存在本机私密目录；不会上传给项目作者。
+
+## 从源码构建
+
+需要 Xcode Command Line Tools。分别下载上游 quarkdrive-webdav v1.3.9 的 arm64 与 x86_64 二进制，放到 `build/backends/arm64/` 和 `build/backends/x86_64/`。然后运行：
 
 ```bash
-git clone https://github.com/xing0325/fuckquark.git
-cd fuckquark
-python3 scripts/configure.py
-bash scripts/build.sh /你保存的位置/quarkdrive-webdav
-open "build/fuck quark.app"
+bash scripts/build.sh "$PWD/build/backends"
+bash scripts/package.sh
 ```
 
-配置脚本询问影视根目录和 Cookie，输入 Cookie 时不会显示。数据仅写入本机 `~/Library/Application Support/QuarkCinema`。若升级旧版本，会保留现有 WebDAV 密码。Cookie 过期后重跑配置并重启本地后端。
+应用输出在 `build/fuck quark.app`，DMG 在 `dist/`。默认使用本机 macOS SDK，可通过 `SDKROOT` 指定与编译器匹配的 SDK。
 
-构建需要 Swift 编译器与 SDK 匹配。如果默认 SDK 不兼容，可以使用 `SDKROOT=/本机已安装的兼容SDK路径 bash scripts/build.sh /后端路径`。本仓库只做本地 ad-hoc 签名，未提供 Apple 公证发行包。
+```bash
+bash scripts/test.sh              # 目录识别、字幕配对、配置权限
+bash scripts/test.sh --installer  # 额外实测官网下载、签名校验及临时安装
+```
 
-## 还没做好
+## 后续计划
 
-- 首次登录向导、通用安装包和另一台 Mac 的完整安装验证。
-- 任意影视库的自动识别。目前三部剧的配置位于 `Sources/QuarkCinema.swift` 的 `Series.all`。
-- 播放进度同步。当前“最近观看”记录的是打开记录，不是跨设备进度。
+- Apple Developer ID 签名和公证、Intel 实机兼容验证。
+- 更多影片元数据与海报识别。
+- 播放进度同步。当前记录的是最近打开的剧集，不是跨设备进度。
 
 ## 项目组成与致谢
 
@@ -69,4 +82,4 @@ open "build/fuck quark.app"
 - SwiftUI / AppKit：片库、剧集页面和本机应用。
 - TVmaze：剧集元数据与海报来源，记录见 `Resources/posters/sources.json`。海报、剧名和商标属于各自权利人；本项目不提供影视文件或分享链接。
 
-账号 Cookie、密码、播放列表、观看记录不属于项目源码，不应提交到仓库。WebDAV 只监听 `127.0.0.1:18080`，启用独立密码并以只读模式运行。
+账号 Cookie、密码、播放列表、观看记录不属于项目源码，不应提交到仓库。WebDAV 只监听 `127.0.0.1:18084`，启用独立密码并以只读模式运行。

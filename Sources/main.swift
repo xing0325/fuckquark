@@ -4,9 +4,10 @@ import NetFS
 import Darwin
 
 let fm = FileManager.default
-let support = fm.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/QuarkCinema")
+let support = ProcessInfo.processInfo.environment["FQ_SUPPORT_DIR"].map { URL(fileURLWithPath: $0, isDirectory: true) } ?? fm.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/QuarkCinema")
 let checkOnly = CommandLine.arguments.contains("--check")
-let backend = URL(string: "http://127.0.0.1:18080/")!
+let backendPort = Int(ProcessInfo.processInfo.environment["FQ_PORT"] ?? "18084") ?? 18084
+let backend = URL(string: "http://127.0.0.1:\(backendPort)/")!
 let server = URL(string: "http://127.0.0.1:18082/")!
 
 enum Failure: LocalizedError {
@@ -47,38 +48,13 @@ func existingMount() -> String? {
     return nil
 }
 func connect() throws -> URL {
-    let password = try readSecret("webdav.password")
-    var code = status(password)
-    if code == 0 {
-        let cookie = try readSecret("quark.cookie")
-        let log = support.appendingPathComponent("service.log")
-        if !fm.fileExists(atPath: log.path) { fm.createFile(atPath: log.path, contents: nil, attributes: [.posixPermissions: 0o600]) }
-        let handle = try FileHandle(forWritingTo: log)
-        try handle.seekToEnd()
-        let p = Process()
-        p.executableURL = Bundle.main.resourceURL!.appendingPathComponent("quarkdrive-webdav")
-        p.arguments = ["--host", "127.0.0.1", "-p", "18080", "--read-only", "--no-self-upgrade", "-I"]
-        var env = ProcessInfo.processInfo.environment
-        env["QUARK_COOKIE"] = cookie
-        env["WEBDAV_AUTH_USER"] = "quark"
-        env["WEBDAV_AUTH_PASSWORD"] = password
-        p.environment = env
-        p.standardOutput = handle; p.standardError = handle
-        p.standardInput = FileHandle.nullDevice
-        try p.run()
-        for _ in 0..<20 {
-            Thread.sleep(forTimeInterval: 0.3)
-            code = status(password)
-            if code != 0 { break }
-            if !p.isRunning { break }
-        }
+    try BackendRuntime.shared.ensureStarted()
+    let rootPath = (try? readSecret("library-root.txt")) ?? "/"
+    let url = rootPath == "/" ? backend : backend.appendingPathComponent(rootPath.trimmingCharacters(in: CharacterSet(charactersIn: "/")), isDirectory: true)
+    guard status(try readSecret("webdav.password"), path: rootPath == "/" ? "" : rootPath) == 207 else {
+        throw Failure.message("无法读取影视目录。请打开“网盘与播放器”重新登录或选择目录。")
     }
-    guard code == 207 else { throw Failure.message("夸克连接失败（状态 \(code)）。请检查网络和夸克登录状态，然后再次打开。") }
-    let rootPath = try readSecret("library-root.txt").trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-    guard status(password, path: rootPath) == 207 else {
-        throw Failure.message("暂时无法读取影视目录。请检查网络，或更新已过期的夸克登录信息。")
-    }
-    return backend.appendingPathComponent(rootPath, isDirectory: true)
+    return url
 }
 
 struct Entry {
@@ -184,8 +160,7 @@ func ipc(_ socketPath: String, _ command: [Any]) throws -> [String: Any] {
 
 func playVideo(_ item: Entry, entries: [Entry]) throws -> Int {
     let subs = matchingSubtitles(item, entries: entries)
-                let cli = "/Applications/IINA.app/Contents/MacOS/iina-cli"
-                guard fm.isExecutableFile(atPath: cli) else { throw Failure.message("没有找到 IINA，请将 IINA 安装到应用程序文件夹。") }
+                guard let player = installedIINA() else { throw Failure.message("尚未安装 IINA，请打开“网盘与播放器”点击安装。") }
                 let cache = support.appendingPathComponent("Playback", isDirectory: true).appendingPathComponent(UUID().uuidString, isDirectory: true)
                 try fm.createDirectory(at: cache, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
                 let socketPath = support.appendingPathComponent("p-" + String(UUID().uuidString.prefix(8)) + ".sock").path
@@ -213,7 +188,7 @@ func playVideo(_ item: Entry, entries: [Entry]) throws -> Int {
                 let done = DispatchSemaphore(value: 0)
                 var launchError: Error?
                 DispatchQueue.main.async {
-                    NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: "/Applications/IINA.app", isDirectory: true), configuration: configuration) { _, error in
+                    NSWorkspace.shared.openApplication(at: player, configuration: configuration) { _, error in
                         launchError = error; done.signal()
                     }
                 }
@@ -248,7 +223,7 @@ struct Series: Identifiable, Equatable {
     let description: String; let seasons: Int; let background: UInt32; let foreground: UInt32; let accent: UInt32
     var dark: Bool { id != "tokyo" }
     var font: Font.Design { id == "wire" ? .monospaced : .serif }
-    var place: String { id == "wire" ? "BALTIMORE · MAJOR CRIMES" : id == "suits" ? "NEW YORK · PEARSON HARDMAN" : "TOKYO · CITY JOURNAL" }
+    var place: String { id == "wire" ? "BALTIMORE · MAJOR CRIMES" : id == "suits" ? "NEW YORK · PEARSON HARDMAN" : id == "tokyo" ? "TOKYO · CITY JOURNAL" : "PERSONAL LIBRARY" }
     static let all = [
         Series(id: "suits", title: "金装律师", english: "SUITS", years: "2011—2019", description: "走进曼哈顿的律所。\n一场关于野心、忠诚与规则的博弈。", seasons: 9, background: 0x191a19, foreground: 0xf2e7d5, accent: 0xcaa66c),
         Series(id: "wire", title: "火线", english: "THE WIRE", years: "2002—2008", description: "一座城市，两边的人。\n从街角到重案组，走进巴尔的摩。", seasons: 5, background: 0x161d1e, foreground: 0xe7e9df, accent: 0xd6b862),
@@ -272,7 +247,7 @@ let episodeTitles: [String: String] = {
     return (try? JSONDecoder().decode([String: String].self, from: data)) ?? [:]
 }()
 func friendlyName(_ item: Entry) -> String {
-    let key = item.name.contains("金装") || item.name.lowercased().contains("suits") ? "suits" : item.name.lowercased().contains("wire") ? "wire" : "tokyo"
+    let key = item.name.contains("金装") || item.name.lowercased().contains("suits") ? "suits" : item.name.lowercased().contains("wire") ? "wire" : item.name.lowercased().contains("tokyo") ? "tokyo" : "unknown"
     if let e = episode(item.name), let title = episodeTitles[key + ":" + e] { return title }
 
     var name = item.url.deletingPathExtension().lastPathComponent
@@ -282,6 +257,8 @@ func friendlyName(_ item: Entry) -> String {
 }
 struct WatchRecord: Codable { let url: String; let name: String; let series: String; let season: Int; let date: Date }
 final class CinemaModel: ObservableObject {
+    @Published var needsSetup = !hasConfiguration()
+    @Published var shows: [Series] = []
     @Published var selected: Series?
     @Published var roots: [String: Entry] = [:]
     @Published var seasonEntries: [Int: Entry] = [:]
@@ -295,18 +272,20 @@ final class CinemaModel: ObservableObject {
     @Published var history: [String: WatchRecord] = [:]
     var generation = 0
     let historyFile = support.appendingPathComponent("watch-history.json")
-    init() { if let d = try? Data(contentsOf: historyFile), let h = try? JSONDecoder().decode([String: WatchRecord].self, from: d) { history = h }; refresh() }
+    init() { if let d = try? Data(contentsOf: historyFile), let h = try? JSONDecoder().decode([String: WatchRecord].self, from: d) { history = h }; if !needsSetup { refresh() } else { statusText = "连接你的网盘" } }
     var filtered: [Entry] { entries.filter { !$0.directory && videos.contains($0.url.pathExtension.lowercased()) && (search.isEmpty || $0.name.localizedCaseInsensitiveContains(search) || friendlyName($0).localizedCaseInsensitiveContains(search)) } }
     var extraFolders: [Entry] { entries.filter { $0.directory } }
     func refresh() {
         if loading { return }; loading = true
         DispatchQueue.global().async {
-            let result = Result { try listing(connect()) }
+            let result = Result { () -> (URL, [Entry]) in let root = try connect(); return (root, try listing(root)) }
             DispatchQueue.main.async {
                 self.loading = false
                 switch result {
-                case .success(let items):
-                    self.roots = Dictionary(uniqueKeysWithValues: Series.all.compactMap { show in items.first(where: { $0.directory && show.matches($0.name) }).map { (show.id, $0) } })
+                case .success(let (root, items)):
+                    let library = buildLibrary(items, root: root)
+                    self.shows = library.map { $0.0 }
+                    self.roots = Dictionary(uniqueKeysWithValues: library.map { ($0.0.id, $0.1) })
                     self.statusText = "网盘已连接"
                     if let show = self.selected { self.open(show) }
                 case .failure(let error): self.statusText = "连接失败"; self.errorText = error.localizedDescription
@@ -364,7 +343,7 @@ final class CinemaModel: ObservableObject {
         }
     }
     func playLast(_ record: WatchRecord) {
-        guard !playing, let url = URL(string: record.url), let show = Series.all.first(where: { $0.id == record.series }) else { return }
+        guard !playing, let url = URL(string: record.url), let show = shows.first(where: { $0.id == record.series }) else { return }
         open(show); activeSeason = record.season; playing = true; statusText = "正在打开上次观看…"
         DispatchQueue.global().async {
             let result = Result { () -> Int in let items = try listing(url.deletingLastPathComponent()); return try playVideo(Entry(url: url, directory: false), entries: items) }
@@ -400,6 +379,7 @@ struct CinemaView: View {
                 if let show = model.selected { detail(show) } else { library }
             }.frame(maxWidth: .infinity, maxHeight: .infinity).background(Color(hex: theme?.background ?? 0x141817))
         }.foregroundColor(fg)
+        .sheet(isPresented: $model.needsSetup) { SetupView { model.needsSetup = false; model.home(); model.refresh() } }
         .preferredColorScheme(theme?.id == "tokyo" ? .light : .dark)
         .alert("暂时无法完成", isPresented: Binding(get: { model.errorText != nil }, set: { if !$0 { model.errorText = nil } })) { Button("好") { model.errorText = nil } } message: { Text(model.errorText ?? "") }
     }
@@ -411,13 +391,14 @@ struct CinemaView: View {
             }.padding(.bottom, 44)
             Button(action: model.home) { Label("我的片库", systemImage: "square.grid.2x2").font(.system(size: 15, weight: .medium)).frame(maxWidth: .infinity, alignment: .leading).padding(12).background(model.selected == nil ? Color.white.opacity(0.09) : .clear).cornerRadius(9) }.buttonStyle(.plain)
             Text("收藏的剧集").font(.system(size: 12)).foregroundColor(.white.opacity(0.4)).padding(.top, 34).padding(.bottom, 14).padding(.leading, 12)
-            ForEach(Series.all) { show in
+            ForEach(model.shows) { show in
                 Button { model.open(show) } label: {
                     HStack { Rectangle().fill(Color(hex: show.accent)).frame(width: 3, height: 18); Text(show.title).font(.system(size: 14)); Spacer() }
                         .padding(12).background(model.selected?.id == show.id ? Color.white.opacity(0.09) : .clear).cornerRadius(9)
                 }.buttonStyle(.plain).padding(.bottom, 4)
             }
             Spacer()
+            Button { model.needsSetup = true } label: { Label("网盘与播放器", systemImage: "gearshape").font(.system(size: 14)) }.buttonStyle(.plain).padding(.bottom, 24).disabled(model.playing || model.loading)
             HStack(spacing: 8) { Image(systemName: "play.circle.fill"); Text("使用 IINA 播放") }.font(.system(size: 13)).foregroundColor(.white.opacity(0.65))
             Menu { Link("海报与资料：TVmaze", destination: URL(string: "https://www.tvmaze.com")!); Link("quarkdrive-webdav", destination: URL(string: "https://github.com/chenqimiao/quarkdrive-webdav")!); Link("IINA", destination: URL(string: "https://iina.io")!) } label: { Text("关于与资料来源").font(.system(size: 11)).foregroundColor(.white.opacity(0.35)) }.menuStyle(.borderlessButton).padding(.top, 16)
         }.padding(22).frame(width: 210).frame(maxHeight: .infinity).background(Color(hex: 0x0e1211)).foregroundColor(Color(hex: 0xe9e7df))
@@ -426,18 +407,19 @@ struct CinemaView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 30) {
                 VStack(alignment: .leading, spacing: 10) { Text("今晚，想看哪一部？").font(.system(size: 34, weight: .medium, design: .serif)); Text("我的片库").font(.system(size: 15)).foregroundColor(fg.opacity(0.5)) }.padding(.top, 16)
-                HStack(alignment: .top, spacing: 25) {
-                    ForEach(Series.all) { show in
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 230), spacing: 25)], alignment: .leading, spacing: 30) {
+                    ForEach(model.shows) { show in
                         Button { model.open(show) } label: {
                             VStack(alignment: .leading, spacing: 13) {
                                 Poster(key: show.id).frame(height: 355).clipped().cornerRadius(9).overlay(RoundedRectangle(cornerRadius: 9).stroke(Color.white.opacity(0.12), lineWidth: 1))
                                 Text(show.title).font(.system(size: 23, weight: .semibold))
-                                HStack { Text(show.english).font(.system(size: 11, weight: .medium)).tracking(1); Spacer(); Text("\(show.seasons) 季").font(.system(size: 12)) }.foregroundColor(fg.opacity(0.5))
+                                HStack { Text(show.english).font(.system(size: 11, weight: .medium)).tracking(1); Spacer(); Text(show.seasons > 0 ? "\(show.seasons) 季" : "打开目录").font(.system(size: 12)) }.foregroundColor(fg.opacity(0.5))
                             }.frame(maxWidth: .infinity, alignment: .leading)
                         }.buttonStyle(.plain)
                     }
                 }
-                if let record = model.history.values.sorted(by: { $0.date > $1.date }).first, let show = Series.all.first(where: { $0.id == record.series }) {
+                if model.shows.isEmpty && !model.loading { Text("这个目录还没有可浏览的剧集。可以在“网盘与播放器”里换一个目录。").foregroundColor(fg.opacity(0.6)).padding(.vertical, 30) }
+                if let record = model.history.values.sorted(by: { $0.date > $1.date }).first, let show = model.shows.first(where: { $0.id == record.series }) {
                     VStack(alignment: .leading, spacing: 14) {
                         Text("上次看到").font(.system(size: 18, weight: .medium))
                         HStack(spacing: 16) {
@@ -458,7 +440,7 @@ struct CinemaView: View {
                     VStack(alignment: .leading, spacing: 12) {
                         Text(show.place).font(.system(size: 11, weight: .medium, design: show.font)).tracking(2).foregroundColor(accent)
                         Text(show.english).font(.system(size: show.id == "tokyo" ? 42 : 54, weight: .medium, design: show.font)).tracking(show.id == "wire" ? -3 : 3)
-                        HStack(spacing: 18) { Text(show.title).font(.system(size: 21, weight: .medium)); Text(show.years + "  ·  \(show.seasons) 季").font(.system(size: 13)).foregroundColor(fg.opacity(0.5)) }
+                        HStack(spacing: 18) { Text(show.title).font(.system(size: 21, weight: .medium)); Text(show.seasons > 0 ? show.years + "  ·  \(show.seasons) 季" : "网盘原文件").font(.system(size: 13)).foregroundColor(fg.opacity(0.5)) }
                         Text(show.description).font(.system(size: 14)).lineSpacing(6).foregroundColor(fg.opacity(0.62)).padding(.top, 2)
                     }.padding(.top, 10)
                     Spacer(minLength: 0)
@@ -521,10 +503,11 @@ final class CinemaDelegate: NSObject, NSApplicationDelegate {
         catch { model.errorText = error.localizedDescription }
     }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { window.makeKeyAndOrderFront(nil); return true }
+    func applicationWillTerminate(_ notification: Notification) { BackendRuntime.shared.stop() }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 }
 if checkOnly {
-    do { let root = try connect(); print("连接正常，影视目录 \(try listing(root).count) 项") } catch { fputs("\(error.localizedDescription)\n", stderr); exit(1) }
+    do { let root = try connect(); print("连接正常，影视目录 \(try listing(root).count) 项"); BackendRuntime.shared.stop() } catch { BackendRuntime.shared.stop(); fputs("\(error.localizedDescription)\n", stderr); exit(1) }
 } else {
     let app = NSApplication.shared; app.setActivationPolicy(.regular)
     if let icon = Bundle.main.url(forResource: "QuarkCinema-v3", withExtension: "icns") { app.applicationIconImage = NSImage(contentsOf: icon) }

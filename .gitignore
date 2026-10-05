@@ -8,3 +8,4 @@ build/
 cookies.json
 connection.txt
 Playback/
+dist/

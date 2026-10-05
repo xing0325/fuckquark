@@ -1,0 +1,98 @@
+[
+  {
+    "show": "The Wire",
+    "page": "https://www.tvmaze.com/shows/179/the-wire",
+    "show_poster": "https://static.tvmaze.com/uploads/images/original_untouched/504/1260189.jpg",
+    "seasons": [
+      {
+        "season": 1,
+        "url": "https://static.tvmaze.com/uploads/images/original_untouched/94/236968.jpg",
+        "fallback_to_show_poster": false
+      },
+      {
+        "season": 2,
+        "url": "https://static.tvmaze.com/uploads/images/original_untouched/94/236969.jpg",
+        "fallback_to_show_poster": false
+      },
+      {
+        "season": 3,
+        "url": "https://static.tvmaze.com/uploads/images/original_untouched/94/236970.jpg",
+        "fallback_to_show_poster": false
+      },
+      {
+        "season": 4,
+        "url": "https://static.tvmaze.com/uploads/images/original_untouched/94/236971.jpg",
+        "fallback_to_show_poster": false
+      },
+      {
+        "season": 5,
+        "url": "https://static.tvmaze.com/uploads/images/original_untouched/94/236972.jpg",
+        "fallback_to_show_poster": false
+      }
+    ]
+  },
+  {
+    "show": "Suits",
+    "page": "https://www.tvmaze.com/shows/172/suits",
+    "show_poster": "https://static.tvmaze.com/uploads/images/original_untouched/393/983536.jpg",
+    "seasons": [
+      {
+        "season": 1,
+        "url": "https://static.tvmaze.com/uploads/images/original_untouched/393/983537.jpg",
+        "fallback_to_show_poster": false
+      },
+      {
+        "season": 2,
+        "url": "https://static.tvmaze.com/uploads/images/original_untouched/393/983538.jpg",
+        "fallback_to_show_poster": false
+      },
+      {
+        "season": 3,
+        "url": "https://static.tvmaze.com/uploads/images/original_untouched/393/983539.jpg",
+        "fallback_to_show_poster": false
+      },
+      {
+        "season": 4,
+        "url": "https://static.tvmaze.com/uploads/images/original_untouched/393/983540.jpg",
+        "fallback_to_show_poster": false
+      },
+      {
+        "season": 5,
+        "url": "https://static.tvmaze.com/uploads/images/original_untouched/393/983550.jpg",
+        "fallback_to_show_poster": false
+      },
+      {
+        "season": 6,
+        "url": "https://static.tvmaze.com/uploads/images/original_untouched/392/980969.jpg",
+        "fallback_to_show_poster": false
+      },
+      {
+        "season": 7,
+        "url": "https://static.tvmaze.com/uploads/images/original_untouched/392/980973.jpg",
+        "fallback_to_show_poster": false
+      },
+      {
+        "season": 8,
+        "url": "https://static.tvmaze.com/uploads/images/original_untouched/392/980978.jpg",
+        "fallback_to_show_poster": false
+      },
+      {
+        "season": 9,
+        "url": "https://static.tvmaze.com/uploads/images/original_untouched/393/983554.jpg",
+        "fallback_to_show_poster": false
+      }
+    ]
+  },
+  {
+    "show": "Tokyo Joshi Zukan",
+    "page": "https://www.tvmaze.com/shows/23744/tokyo-joshi-zukan",
+    "show_poster": "https://static.tvmaze.com/uploads/images/original_untouched/167/418508.jpg",
+    "seasons": [
+      {
+        "season": 1,
+        "url": "https://static.tvmaze.com/uploads/images/original_untouched/167/418508.jpg",
+        "fallback_to_show_poster": true
+      }
+    ]
+  }
+]

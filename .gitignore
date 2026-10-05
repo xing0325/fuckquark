@@ -1,0 +1,10 @@
+.DS_Store
+build/
+*.cookie
+*.password
+*.m3u
+*.log
+.env*
+cookies.json
+connection.txt
+Playback/
